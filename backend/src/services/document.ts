@@ -1,4 +1,4 @@
-import { PDFParse } from 'pdf-parse';
+import { PDFParser } from 'pdf2json';
 
 export async function extractText(
   buffer: Buffer,
@@ -33,30 +33,43 @@ function extractFromTxt(buffer: Buffer): { pageNumber: number; text: string }[] 
   return pages;
 }
 
-async function extractFromPdf(buffer: Buffer): Promise<{ pageNumber: number; text: string }[]> {
-  let parser: PDFParse;
-  try {
-    parser = new PDFParse({ data: buffer });
-  } catch (err) {
-    throw new Error(`Failed to initialize PDF parser: ${err instanceof Error ? err.message : 'Unknown error'}`);
-  }
+function extractFromPdf(buffer: Buffer): Promise<{ pageNumber: number; text: string }[]> {
+  return new Promise((resolve, reject) => {
+    const parser = new PDFParser();
 
-  let textResult;
-  try {
-    textResult = await parser.getText();
-  } catch (err) {
-    throw new Error(`Failed to parse PDF: ${err instanceof Error ? err.message : 'Unknown error'}`);
-  } finally {
-    await parser.destroy();
-  }
+    parser.on('pdfParser_dataError', (errData: { parserError: Error }) => {
+      reject(new Error(`Failed to parse PDF: ${errData.parserError.message}`));
+    });
 
-  const { pages, total } = textResult;
-  if (!pages || pages.length === 0) {
-    throw new Error('PDF contains no extractable text');
-  }
+    parser.on('pdfParser_dataReady', (pdfData: {
+      Pages: Array<{
+        Texts: Array<{
+          R: Array<{ T: string }>;
+        }>;
+      }>;
+    }) => {
+      try {
+        const pages = pdfData.Pages.map((page, index) => {
+          const text = page.Texts.map(t =>
+            decodeURIComponent(t.R.map(r => r.T).join(''))
+          ).join(' ');
+          return {
+            pageNumber: index + 1,
+            text: text.trim()
+          };
+        });
 
-  return pages.map((page: { num: number; text: string }) => ({
-    pageNumber: page.num,
-    text: page.text.trim()
-  }));
+        if (pages.length === 0 || pages.every(p => !p.text)) {
+          reject(new Error('PDF contains no extractable text'));
+          return;
+        }
+
+        resolve(pages);
+      } catch (err) {
+        reject(new Error(`Failed to extract text from PDF: ${err instanceof Error ? err.message : 'Unknown error'}`));
+      }
+    });
+
+    parser.parseBuffer(buffer);
+  });
 }

@@ -13,7 +13,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-"dependencies": {
+  "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@oza24/shared-types": "file:../packages/shared-types",
     "@types/uuid": "^10.0.0",
@@ -22,7 +22,7 @@
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "multer": "^2.4.0",
-    "pdf-parse": "^2.4.5",
+    "pdf2json": "^4.1.0",
     "uuid": "^14.0.3"
   },
   "devDependencies": {
