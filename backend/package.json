@@ -15,7 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@oza24/shared-types": "file:../packages/shared-types",
+    "@oza24/shared-types": "^1.0.0",
     "@types/uuid": "^10.0.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.7",

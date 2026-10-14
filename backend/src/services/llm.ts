@@ -5,9 +5,153 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
+// gemini-2.5-flash — confirmed available for this API key
+const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
 
 const USE_MOCK = process.env.USE_MOCK_LLM === 'true';
+console.log(`[LLM] Mode: ${USE_MOCK ? 'MOCK' : 'Gemini 2.5 Flash (real API)'}`);
+console.log(`[LLM] API key set: ${!!(process.env.GEMINI_API_KEY)}`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Imperative verbs commonly found in slide decks (learning outcomes / tasks)
+// These lines are NOT explanatory — they tell students what to do, not what
+// the concept IS.
+// ─────────────────────────────────────────────────────────────────────────────
+const SLIDE_IMPERATIVE_VERBS = new Set([
+  'analyze', 'analyse', 'apply', 'assess', 'calculate', 'classify', 'compare',
+  'complete', 'compose', 'construct', 'contrast', 'create', 'critique',
+  'define', 'demonstrate', 'describe', 'design', 'develop', 'differentiate',
+  'discuss', 'distinguish', 'evaluate', 'examine', 'explain', 'explore',
+  'identify', 'implement', 'interpret', 'investigate', 'justify', 'list',
+  'memorize', 'outline', 'predict', 'prepare', 'present', 'produce', 'prove',
+  'recall', 'recognize', 'relate', 'review', 'select', 'solve', 'state',
+  'study', 'summarize', 'support', 'trace', 'understand', 'use', 'utilize',
+  'write',
+]);
+
+const STOP_WORDS = new Set([
+  'what', 'this', 'that', 'with', 'from', 'have', 'about', 'does',
+  'give', 'tell', 'explain', 'the', 'and', 'for', 'are', 'was',
+  'each', 'some', 'into', 'them', 'they', 'their', 'will', 'more',
+  'also', 'been', 'were', 'has', 'had', 'can', 'its', 'but', 'not',
+]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slide-artifact detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isSlideArtifact(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length < 10) return true;
+
+  const lower = trimmed.toLowerCase();
+  const firstWord = lower.split(/\s+/)[0].replace(/[^a-z]/g, '');
+
+  // Learning outcome / discussion topic verb starts
+  if (SLIDE_IMPERATIVE_VERBS.has(firstWord) && trimmed.length < 100) return true;
+
+  // Section header patterns
+  if (/^(discussion questions?|learning outcomes?|topics? covered|key points?|overview|objectives?|introduction to|main areas?|agenda|outline|recap|review|summary)/i.test(trimmed)) return true;
+
+  // Questions
+  if (/[?]$/.test(trimmed)) return true;
+
+  // Slide check marks / bullets used as list items (very short)
+  if (/^[✓•▶→–►]\s/.test(trimmed) && trimmed.length < 60) return true;
+
+  // Pure title-case short lines (slide headings): e.g. "Word Formation", "NLP Overview"
+  // Must not contain lowercase content words
+  if (trimmed.length < 55 && /^[A-Z]/.test(trimmed) && !/[.,:;()\d]/.test(trimmed)) {
+    const words = trimmed.split(/\s+/);
+    if (words.length <= 5 && words.every(w => /^[A-Z]/.test(w) || ['and', 'or', 'of', 'the', 'in', 'for', 'to', 'a', 'an'].includes(w.toLowerCase()))) {
+      return true;
+    }
+  }
+
+  // Page numbers, lone numbers
+  if (/^\d+\.?\s*$/.test(trimmed)) return true;
+
+  // Slide number / footer markers
+  if (/^(page|slide)\s+\d+/i.test(trimmed)) return true;
+
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extract genuinely informative sentences from raw PDF/slide text
+// ─────────────────────────────────────────────────────────────────────────────
+
+function extractContentSentences(text: string): string[] {
+  const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const goodLines: string[] = [];
+
+  for (const line of rawLines) {
+    if (!isSlideArtifact(line)) {
+      goodLines.push(line);
+    }
+  }
+
+  // Split lines into sentences on sentence-ending punctuation
+  const sentences: string[] = [];
+  for (const line of goodLines) {
+    const parts = line
+      .split(/(?<=[.!])\s+(?=[A-Z])/)
+      .map(s => s.trim())
+      .filter(s => s.length > 25);
+    sentences.push(...parts);
+  }
+
+  // Deduplicate
+  const seen = new Set<string>();
+  return sentences.filter(s => {
+    const key = s.slice(0, 70).toLowerCase().replace(/\s+/g, ' ');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rank sentences by relevance to a user query
+// ─────────────────────────────────────────────────────────────────────────────
+
+function rankByRelevance(sentences: string[], query: string, maxCount: number = 6): string[] {
+  if (sentences.length === 0) return [];
+
+  const queryWords = query.toLowerCase()
+    .split(/\W+/)
+    .filter(w => w.length > 3 && !STOP_WORDS.has(w));
+
+  const scored = sentences.map(s => {
+    const lower = s.toLowerCase();
+    // Exact query word matches (weighted heavily)
+    const wordScore = queryWords.reduce((acc, w) => acc + (lower.includes(w) ? 2 : 0), 0);
+    // Prefer longer, more informative sentences
+    const lengthBonus = Math.min(s.length / 200, 1);
+    // Penalise very short fragments
+    const lengthPenalty = s.length < 40 ? -1 : 0;
+    return { text: s, score: wordScore + lengthBonus + lengthPenalty };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.filter(s => s.score > 0);
+  if (top.length === 0) return sentences.slice(0, maxCount);
+  return top.slice(0, maxCount).map(s => s.text);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fallback: extract the longest informative sentences regardless of relevance
+// ─────────────────────────────────────────────────────────────────────────────
+
+function topSentencesByLength(sentences: string[], count: number = 4): string[] {
+  return [...sentences]
+    .sort((a, b) => b.length - a.length)
+    .slice(0, count);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic Mock LLM — slide-deck-aware
+// ─────────────────────────────────────────────────────────────────────────────
 
 function mockAnswer(
   question: string,
@@ -15,377 +159,174 @@ function mockAnswer(
 ): AskResponse {
   if (retrievedChunks.length === 0) {
     return {
-      answer: 'I could not find any relevant information in the document to answer your question.',
+      answer: 'No relevant sections were found in this document for your question. Try rephrasing or asking about a specific topic in the document.',
       citations: [],
       confidence: 0.1,
-      processingTimeMs: 0
+      processingTimeMs: 0,
     };
   }
 
-  const topChunks = retrievedChunks.slice(0, 5);
-  const allPages = [...new Set(topChunks.map(c => c.pageNumber))].sort((a, b) => a - b);
-  
-  const isSummaryQuery = /each topic|all topics|summarize|overview|what.*cover|what.*contain|list.*topic|main.*topic|full summary|complete summary/i.test(question);
-  const isDefinitionQuery = /what is|define|definition of|meaning of/i.test(question);
-  const isExplanationQuery = /explain|how does|how to|describe|walk me through/i.test(question);
-  const isComparisonQuery = /difference|compare|versus|vs|better/i.test(question);
-
-  const combinedContent = topChunks.map(c => c.text).join('\n\n');
-  
-  let answer: string;
-
-  if (isSummaryQuery) {
-    answer = generateComprehensiveSummary(combinedContent, question);
-  } else if (isDefinitionQuery) {
-    answer = generateDefinition(question, topChunks);
-  } else if (isExplanationQuery) {
-    answer = generateExplanation(question, combinedContent);
-  } else if (isComparisonQuery) {
-    answer = generateComparison(question, combinedContent);
-  } else {
-    answer = generateGeneralAnswer(question, topChunks);
+  // Vague one-word answers like "yes"
+  const isTooVague = question.trim().split(/\s+/).length < 3;
+  if (isTooVague) {
+    return {
+      answer: 'Could you be more specific? For example: "Explain what morphology is" or "Give examples of morphemes".',
+      citations: [],
+      confidence: 0.2,
+      processingTimeMs: 0,
+    };
   }
 
-  const pageRef = allPages.map(p => `Page ${p}`).join(', ');
-  const finalAnswer = `${answer}\n\nSources: ${pageRef}`;
+  const topChunks = retrievedChunks.slice(0, 6);
+  const combinedRaw = topChunks.map(c => c.text).join('\n\n');
+
+  // Extract only genuine content sentences (no slide artifacts)
+  const cleanSentences = extractContentSentences(combinedRaw);
+
+  const isSummaryQuery   = /summarize|overview|what.*cover|what.*contain|main.*topics?|key.*points?|about this doc|full summary/i.test(question);
+  const isComparisonQuery = /difference|compare|versus|\bvs\b|advantage|disadvantage|better than/i.test(question);
+  const isListQuery       = /\blist\b|give.*example|show.*example|example.*of|types? of|kinds? of/i.test(question);
+  const isDefinitionQuery = /\bwhat (?:is|are)\b|^define\b|\bdefinition of\b/i.test(question);
+  const isExplanationQuery = /explain|how does|how to|describe|tell me|walk.*through|in detail/i.test(question);
+
+  let answer: string;
+  if (isSummaryQuery)    answer = buildSummary(topChunks, cleanSentences);
+  else if (isComparisonQuery) answer = buildComparison(question, cleanSentences, combinedRaw);
+  else if (isListQuery)  answer = buildList(question, cleanSentences, combinedRaw);
+  else if (isDefinitionQuery || isExplanationQuery) answer = buildExplanation(question, cleanSentences, combinedRaw);
+  else                   answer = buildGeneral(question, cleanSentences, combinedRaw);
+
+  const confidence = cleanSentences.length >= 3 ? 0.82 : cleanSentences.length >= 1 ? 0.55 : 0.25;
 
   return {
-    answer: finalAnswer,
+    answer,
     citations: topChunks.slice(0, 3).map(c => ({
       chunkId: c.id,
       documentId: c.documentId,
       pageNumber: c.pageNumber,
-      excerpt: c.text.slice(0, 200)
+      excerpt: c.text.slice(0, 200),
     })),
-    confidence: retrievedChunks.length > 0 ? 0.85 : 0.1,
-    processingTimeMs: 0
+    confidence,
+    processingTimeMs: 0,
   };
 }
 
-function generateComprehensiveSummary(content: string, question: string): string {
-  const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 20);
-  const keyTerms = ['n-gram', 'lstm', 'word prediction', 'preprocessing', 'tokenization', 'unigram', 'bigram', 'trigram', 'recurrent', 'neural network', 'data collection', 'pipeline', 'architecture', 'training', 'embedding', 'attention', 'transformer', 'probability', 'markov', 'ocr', 'crnn', 'handwritten', 'character recognition'];
-  
-  const relevantSentences = sentences
-    .filter(s => s.length > 30)
-    .filter(s => keyTerms.some(term => s.toLowerCase().includes(term.toLowerCase())))
-    .slice(0, 12);
+// ─────────────────────────────────────────────────────────────────────────────
+// Answer builders
+// ─────────────────────────────────────────────────────────────────────────────
 
-  if (relevantSentences.length === 0) {
-    const fallback = content.split(/[.!?]+/).filter(s => s.trim().length > 30).slice(0, 5);
-    return `Document Summary\n\n${fallback.join('. ')}.`;
-  }
-
-  const topics = categorizeContent(relevantSentences.join(' '));
-  
-  let summary = `Document Overview\n\nThis document covers ${topics.length} main topics:\n\n`;
-  
-  topics.forEach((topic, i) => {
-    summary += `${i + 1}. ${topic.name}\n\n${topic.description}\n\n`;
-  });
-  
-  summary += `The document provides both theoretical foundations and practical applications, with examples and formulas where applicable.`;
-  
-  return summary;
-}
-
-function categorizeContent(content: string): { name: string; description: string }[] {
-  const topics: { name: string; description: string }[] = [];
-  const lowerContent = content.toLowerCase();
-  
-  if (lowerContent.includes('n-gram') || lowerContent.includes('unigram') || lowerContent.includes('bigram') || lowerContent.includes('trigram') || lowerContent.includes('markov')) {
-    topics.push({
-      name: 'N-Grams and Language Modeling',
-      description: `Definition: Contiguous sequences of N words or characters used for language modeling.
-- Unigrams (N=1): Single words
-- Bigrams (N=2): Two-word sequences
-- Trigrams (N=3): Three-word sequences
-
-Markov Assumption: The probability of a word depends only on the previous N-1 words.
-
-Applications: Probability estimation, text generation, autocomplete, spell checking, language modeling.`
-    });
-  }
-  
-  if (lowerContent.includes('lstm') || lowerContent.includes('long short-term') || lowerContent.includes('recurrent neural network') || lowerContent.includes('cell state') || lowerContent.includes('gate')) {
-    topics.push({
-      name: 'LSTM (Long Short-Term Memory)',
-      description: `Architecture: Specialized RNN that solves the vanishing gradient problem using gating mechanisms.
-
-Four Key Gates:
-1. Forget Gate - Decides what information to discard from cell state
-2. Input Gate - Decides what new information to store
-3. Cell State - Long-term memory that flows through the chain
-4. Output Gate - Decides what part of cell state to output
-
-Applications: Sequence modeling, text generation, time series prediction, handwriting recognition, machine translation.`
-    });
-  }
-  
-  if (lowerContent.includes('word prediction') || lowerContent.includes('next word') || lowerContent.includes('language model') || lowerContent.includes('autocomplete')) {
-    topics.push({
-      name: 'Word Prediction and Language Modeling',
-      description: `Task: Predicting the next word in a sequence using probabilistic models.
-
-Approaches:
-- N-gram models: Count-based with Markov assumption plus smoothing (Laplace, Kneser-Ney)
-- Neural models: RNNs, LSTMs, Transformers with embeddings
-- Evaluation: Perplexity, accuracy@k, BLEU score
-
-Applications: Autocomplete, spell correction, text generation, machine translation.`
-    });
-  }
-  
-  if (lowerContent.includes('preprocessing') || lowerContent.includes('tokenization') || lowerContent.includes('cleaning') || lowerContent.includes('normalization') || lowerContent.includes('stemming') || lowerContent.includes('lemmatization')) {
-    topics.push({
-      name: 'Text Preprocessing Pipeline',
-      description: `Essential Steps:
-1. Cleaning - Remove HTML, special characters, extra whitespace
-2. Tokenization - Split into words/subwords (BPE, WordPiece, character-level)
-3. Normalization - Lowercase, unicode normalization, remove accents
-4. Stopword Removal - Filter common words (optional for neural models)
-5. Stemming/Lemmatization - Reduce words to root form
-6. Encoding - Convert to IDs/vectors for model input
-
-Tools: NLTK, spaCy, HuggingFace tokenizers, SentencePiece.`
-    });
-  }
-  
-if (lowerContent.includes('data collection') || lowerContent.includes('pipeline') || lowerContent.includes('acquisition') || lowerContent.includes('ocr') || lowerContent.includes('crnn') || lowerContent.includes('handwritten')) {
-    topics.push({
-      name: 'OCR and Document Understanding Pipeline (CRNN)',
-      description: `Architecture: CNN plus RNN plus CTC Loss for end-to-end text recognition.
- 
-Stages:
-1. Image Acquisition - Camera/scanner input
-2. Preprocessing - Binarization, deskewing, noise removal, normalization
-3. CRNN - CNN feature extractor plus BiLSTM sequence modeling plus CTC decoder
-4. Post-processing - Dictionary correction, formatting, validation
- 
-Real-Life Applications:
-OCR - CRNN Role: Recognizes printed text; LSTM Role: Predicts missing words
-Handwritten Recognition - CRNN Role: Converts handwriting to text; LSTM Role: Corrects and completes sentences
-Google Lens - CRNN Role: Reads text from images; LSTM Role: Improves text understanding
-Automatic Form Processing - CRNN Role: Extracts form fields; LSTM Role: Predicts incomplete entries
-Medical Prescriptions - CRNN Role: Recognizes medicine names; LSTM Role: Corrects spelling, predicts names
-License Plate Recognition - CRNN Role: Reads plate characters; LSTM Role: Predicts missing characters
-Document Digitization - CRNN Role: Converts scanned pages; LSTM Role: Improves sentence quality
-Smart Keyboard - CRNN Role: Reads typed sequence; LSTM Role: Predicts next word`
-    });
-  }
-  
-  if (topics.length === 0) {
-    topics.push({
-      name: 'General Technical Content',
-      description: 'The document contains technical content related to NLP, machine learning, and document understanding concepts.'
-    });
-  }
-  
-  return topics;
-}
-
-function generateDefinition(question: string, chunks: any[]): string {
-  const content = chunks.map(c => c.text).join('\n\n');
-  const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 30);
-  
-  const match = question.toLowerCase().match(/what is\s+([^?]+)|define\s+([^?]+)|definition of\s+([^?]+)/i);
-  const term = match ? (match[1] || match[2] || match[3]) : 'the concept';
-  
-  // First, try to find sentences that explicitly define the term
-  const definitionPatterns = [
-    new RegExp(`${term.toLowerCase()}\\s+(is|are|refers to|means|refers)\\s+`, 'i'),
-    new RegExp(`(is|are)\\s+${term.toLowerCase()}\\s+`, 'i'),
-    new RegExp(`${term.toLowerCase()}\\s*:\\s*`, 'i'),
-    new RegExp(`${term.toLowerCase()}\\s+(architecture|structure|mechanism|works|functions|operates)\\s+`, 'i'),
-  ];
-  
-  // First pass: explicit definition patterns (prioritize sentences that START with the term or have explicit definition)
-  let relevant = sentences
-    .filter(s => s.length > 30)
-    .filter(s => {
-      const lower = s.toLowerCase();
-      return definitionPatterns.some(p => p.test(lower)) || 
-             lower.startsWith(term.toLowerCase() + ' is') ||
-             lower.startsWith(term.toLowerCase() + ' are') ||
-             lower.startsWith(term.toLowerCase() + ' refers') ||
-             lower.startsWith(term.toLowerCase() + ' means') ||
-             lower.startsWith(term.toLowerCase() + ' architecture') ||
-             lower.startsWith(term.toLowerCase() + ' structure') ||
-             lower.startsWith(term.toLowerCase() + ' mechanism') ||
-             lower.startsWith(term.toLowerCase() + ' works') ||
-             lower.startsWith(term.toLowerCase() + ' functions') ||
-             lower.startsWith(term.toLowerCase() + ' operates') ||
-             lower.startsWith(term.toLowerCase() + ' consists') ||
-             lower.startsWith(term.toLowerCase() + ' comprises');
-    })
-    .slice(0, 4);
-  
-  // Second pass: sentences with the term and definition-like keywords
-  if (relevant.length < 2) {
-    const definitionKeywords = ['architecture', 'structure', 'mechanism', 'works', 'functions', 'operates', 'consists of', 'comprises', 'includes', 'consists', 'gating', 'gate', 'cell state', 'memory'];
-    const additionalRelevant = sentences
-      .filter(s => s.length > 30)
-      .filter(s => s.toLowerCase().includes(term.toLowerCase()) && 
-                 definitionKeywords.some(kw => s.toLowerCase().includes(kw)))
-      .slice(0, 4);
-    
-    // Merge, avoiding duplicates
-    for (const s of additionalRelevant) {
-      if (!relevant.includes(s)) {
-        relevant.push(s);
+function buildSummary(
+  chunks: { text: string; pageNumber: number }[],
+  sentences: string[]
+): string {
+  // Grab the best 1 content line per chunk as a "topic anchor"
+  const topicLines: string[] = [];
+  for (const chunk of chunks.slice(0, 5)) {
+    const lines = chunk.text.split('\n').map(l => l.trim());
+    for (const line of lines) {
+      if (!isSlideArtifact(line) && line.length > 20 && line.length < 120) {
+        topicLines.push(`- ${line} *(Pg ${chunk.pageNumber})*`);
+        break;
       }
     }
-    relevant = relevant.slice(0, 4);
   }
-  
-  // Third pass: broader search with key terms
-  if (relevant.length < 2) {
-    relevant = sentences
-      .filter(s => s.length > 30)
-      .filter(s => s.toLowerCase().includes(term.toLowerCase()) || 
-                 keyTermsForTerm(term).some(t => s.toLowerCase().includes(t.toLowerCase())))
+
+  const bodyPoints = topSentencesByLength(sentences, 4);
+
+  let out = '';
+  if (topicLines.length > 0) {
+    out += `**Key content in this document:**\n\n${topicLines.join('\n')}\n\n`;
+  }
+  if (bodyPoints.length > 0) {
+    out += `**Summary:**\n\n${bodyPoints.join('\n\n')}`;
+  }
+  if (!out.trim()) {
+    out = 'This document covers several related topics. Try asking about a specific concept for a detailed explanation.';
+  }
+  return out.trim();
+}
+
+function buildExplanation(question: string, sentences: string[], rawContent: string): string {
+  const relevant = rankByRelevance(sentences, question, 8);
+
+  if (relevant.length === 0) {
+    // Last resort: pull longest raw sentences ignoring all filtering
+    const emergency = rawContent
+      .split(/\n/)
+      .map(l => l.trim())
+      .filter(l => l.length > 50 && !/[?]$/.test(l) && !SLIDE_IMPERATIVE_VERBS.has(l.split(' ')[0]?.toLowerCase()))
+      .sort((a, b) => b.length - a.length)
       .slice(0, 4);
-  }
-  
-  if (relevant.length === 0) {
-    return formatDefinition(term, `Based on the document, ${term} is discussed but a specific definition isn't explicitly stated in the retrieved sections. The document covers this topic in context. Please refer to the full document for complete details.`);
-  }
-  
-  return formatDefinition(term, relevant.join('\n\n'));
-}
 
-function formatDefinition(term: string, body: string): string {
-  return `${term.charAt(0).toUpperCase() + term.slice(1)}\n\n${body}\n\nDefinition sourced from document content.`;
-}
-
-function keyTermsForTerm(term: string): string[] {
-  const termMap: Record<string, string[]> = {
-    'n-gram': ['n-gram', 'unigram', 'bigram', 'trigram', 'markov'],
-    'unigram': ['unigram', 'n-gram', 'single word', '1-gram'],
-    'bigram': ['bigram', 'n-gram', 'two word', '2-gram'],
-    'trigram': ['trigram', 'n-gram', 'three word', '3-gram'],
-    'lstm': ['lstm', 'long short-term memory', 'recurrent', 'cell state', 'gate'],
-    'word prediction': ['word prediction', 'next word', 'language model', 'autocomplete'],
-    'preprocessing': ['preprocessing', 'tokenization', 'cleaning', 'normalization'],
-    'tokenization': ['tokenization', 'token', 'preprocessing', 'bpe', 'wordpiece'],
-    'ocr': ['ocr', 'optical character recognition', 'crnn'],
-    'crnn': ['crnn', 'cnn', 'rnn', 'ctc', 'optical character recognition'],
-    'handwritten': ['handwritten', 'handwriting', 'recognition', 'icr'],
-  };
-  return termMap[term.toLowerCase()] || [term];
-}
-
-function generateExplanation(question: string, content: string): string {
-  const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 30);
-  const keyTerms = ['lstm', 'n-gram', 'word prediction', 'preprocessing', 'tokenization', 'recurrent', 'neural network', 'probability', 'markov', 'training', 'architecture', 'gate', 'cell state', 'crnn', 'cnn', 'ctc', 'ocr', 'handwritten'];
-  
-  const relevant = sentences
-    .filter(s => s.length > 30)
-    .filter(s => keyTerms.some(t => s.toLowerCase().includes(t)))
-    .slice(0, 8);
-  
-  if (relevant.length === 0) {
-    return `Based on the document:\n\n${content.slice(0, 1200)}...`;
+    if (emergency.length === 0) {
+      return 'I found related sections but was not able to extract a clear explanatory answer. The document may be a slide deck with limited prose. Try asking a very specific question like "What is morphology?" or "Give an example of a morpheme".';
+    }
+    return emergency.join('\n\n');
   }
-  
-  let explanation = `Explanation\n\n`;
-  explanation += `Based on the document, here is how this works:\n\n`;
-  
+
+  // Extract term from question for bolding in header
+  const termRx = /(?:what (?:is|are)|explain(?:\s+me)?(?:\s+what\s+(?:is|are))?|define|describe)\s+([\w\s/-]+?)(?:\s+and\b|\s+with\b|\s+in\b|\?|$)/i;
+  const termMatch = question.match(termRx);
+  const term = termMatch?.[1]?.trim() ?? '';
+
+  // Separate into concepts, steps, and examples
   const concepts: string[] = [];
   const steps: string[] = [];
   const examples: string[] = [];
-  
-  relevant.forEach(s => {
+
+  for (const s of relevant) {
     const lower = s.toLowerCase();
-    if (lower.includes('step') || lower.includes('stage') || lower.includes('phase') || lower.includes('first') || lower.includes('then') || lower.includes('next') || lower.includes('finally')) {
+    if (/\bstep\b|\bstage\b|\bfirst[,\s]|\bthen\b|\bnext\b|\bfinally\b/.test(lower)) {
       steps.push(s);
-    } else if (lower.includes('example') || lower.includes('for instance') || lower.includes('e.g.') || lower.includes('such as')) {
+    } else if (/\bexample\b|\binstance\b|\be\.g\b|\bsuch as\b|\bfor instance\b|\blike\b/.test(lower) ||
+               /\bplaying\b|\bunhappy\b|\bstudents?\b|\bplayed\b|\bbooks\b/.test(lower)) {
       examples.push(s);
     } else {
       concepts.push(s);
     }
-  });
-  
+  }
+
+  let out = '';
+  if (term) out += `**${term.charAt(0).toUpperCase() + term.slice(1)}**\n\n`;
+
   if (concepts.length > 0) {
-    explanation += `Key Concepts\n\n${concepts.join('\n\n')}\n\n`;
+    out += concepts.join('\n\n') + '\n\n';
   }
   if (steps.length > 0) {
-    explanation += `Process / Steps\n\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n`;
+    out += `**How it works:**\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n`;
   }
   if (examples.length > 0) {
-    explanation += `Examples\n\n${examples.join('\n\n')}\n\n`;
+    out += `**Examples from the document:**\n${examples.map(s => `- ${s}`).join('\n')}`;
   }
-  if (concepts.length === 0 && steps.length === 0 && examples.length === 0) {
-    explanation += relevant.join('\n\n');
-  }
-  
-  return explanation;
+
+  return out.trim() || relevant.join('\n\n');
 }
 
-function generateComparison(question: string, content: string): string {
-  const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 30);
-  const comparisonTerms = ['difference', 'versus', 'vs', 'better', 'advantage', 'disadvantage', 'compare', 'compared to', 'unlike', 'similar', 'contrast'];
-  const relevant = sentences
-    .filter(s => s.length > 30)
-    .filter(s => comparisonTerms.some(t => s.toLowerCase().includes(t)) || 
-               s.toLowerCase().includes('lstm') || 
-               s.toLowerCase().includes('n-gram') ||
-               s.toLowerCase().includes('transformer') ||
-               s.toLowerCase().includes('rnn') ||
-               s.toLowerCase().includes('cnn') ||
-               s.toLowerCase().includes('gru'))
-    .slice(0, 6);
-  
+function buildComparison(question: string, sentences: string[], rawContent: string): string {
+  const relevant = rankByRelevance(sentences, question, 6);
   if (relevant.length === 0) {
-    return `Based on the document:\n\n${content.slice(0, 1200)}...`;
+    return 'The retrieved sections do not directly compare these items. Try asking about each concept individually for a clearer answer.';
   }
-  
-  let comparison = `Comparison\n\n`;
-  
-  relevant.forEach((s, i) => {
-    comparison += `${i + 1}. ${s}\n`;
-  });
-  
-  return comparison;
+  return `**Comparison from the document:**\n\n${relevant.map((s, i) => `${i + 1}. ${s}`).join('\n\n')}`;
 }
 
-function generateGeneralAnswer(question: string, chunks: any[]): string {
-  const content = chunks.map(c => c.text).join('\n\n');
-  const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 30);
-  
-  const questionWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-  const relevant = sentences
-    .filter(s => s.length > 30)
-    .filter(s => questionWords.some(w => s.toLowerCase().includes(w)))
-    .slice(0, 5);
-  
+function buildList(question: string, sentences: string[], rawContent: string): string {
+  const relevant = rankByRelevance(sentences, question, 8);
   if (relevant.length === 0) {
-    return `Based on the document:\n\n${content.slice(0, 1200)}...`;
+    return 'No specific list was found in the retrieved sections. Try being more specific, e.g. "List types of morphemes".';
   }
-  
-  let answer = `Answer\n\n`;
-  answer += relevant.map(s => `- ${s}`).join('\n');
-  
-  return answer;
+  return `**From the document:**\n\n${relevant.map(s => `- ${s}`).join('\n\n')}`;
 }
 
-function extractKeyPoints(text: string): string {
-  const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 30);
-  const keyTerms = ['n-gram', 'lstm', 'word prediction', 'preprocessing', 'tokenization', 'unigram', 'bigram', 'trigram', 'recurrent', 'neural network', 'data collection', 'pipeline', 'ocr', 'crnn', 'handwritten', 'character recognition'];
-  const relevant = sentences.filter(s => keyTerms.some(term => s.toLowerCase().includes(term.toLowerCase())));
-  return relevant.slice(0, 8).join('\n\n') || sentences.slice(0, 5).join('\n\n');
+function buildGeneral(question: string, sentences: string[], rawContent: string): string {
+  const relevant = rankByRelevance(sentences, question, 5);
+  if (relevant.length === 0) return buildExplanation(question, sentences, rawContent);
+  return relevant.join('\n\n');
 }
 
-function findBestChunkForDefinition(question: string, chunks: any[]): any {
-  const terms = question.toLowerCase().match(/what is\s+(\w+)|define\s+(\w+)|definition of\s+(\w+)/i);
-  const targetTerm = terms ? (terms[1] || terms[2] || terms[3]) : '';
-  
-  if (targetTerm) {
-    const matching = chunks.find(c => c.text.toLowerCase().includes(targetTerm.toLowerCase()));
-    if (matching) return matching;
-  }
-  return chunks[0];
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Real Gemini API integration
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function generateAnswer(
   question: string,
@@ -396,7 +337,7 @@ export async function generateAnswer(
     return mockAnswer(question, retrievedChunks);
   }
 
-  const prompt = buildPrompt(question, context, retrievedChunks);
+  const prompt = buildPrompt(question, retrievedChunks);
 
   try {
     const controller = new AbortController();
@@ -405,30 +346,30 @@ export async function generateAnswer(
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.1,
+        temperature: 0.2,
         responseMimeType: 'application/json',
         responseSchema: {
           type: SchemaType.OBJECT,
           properties: {
-            answer: { type: SchemaType.STRING },
+            answer:   { type: SchemaType.STRING },
             citations: {
               type: SchemaType.ARRAY,
               items: {
                 type: SchemaType.OBJECT,
                 properties: {
-                  chunkId: { type: SchemaType.STRING },
+                  chunkId:    { type: SchemaType.STRING },
                   documentId: { type: SchemaType.STRING },
                   pageNumber: { type: SchemaType.INTEGER },
-                  excerpt: { type: SchemaType.STRING }
+                  excerpt:    { type: SchemaType.STRING },
                 },
-                required: ['chunkId', 'documentId', 'pageNumber', 'excerpt'] as string[]
-              }
+                required: ['chunkId', 'documentId', 'pageNumber', 'excerpt'] as string[],
+              },
             },
-            confidence: { type: SchemaType.NUMBER }
+            confidence: { type: SchemaType.NUMBER },
           },
-          required: ['answer', 'citations', 'confidence'] as string[]
-        }
-      }
+          required: ['answer', 'citations', 'confidence'] as string[],
+        },
+      },
     }, { signal: controller.signal });
 
     clearTimeout(timeout);
@@ -436,23 +377,18 @@ export async function generateAnswer(
     const text = result.response.text();
     const parsed = JSON.parse(text);
 
-    const validatedCitations = validateCitations(parsed.citations, retrievedChunks);
-
     return {
       answer: parsed.answer,
-      citations: validatedCitations,
+      citations: validateCitations(parsed.citations, retrievedChunks),
       confidence: Math.max(0, Math.min(1, parsed.confidence)),
-      processingTimeMs: 0
+      processingTimeMs: 0,
     };
   } catch (error: any) {
-    const isTimeout = error.name === 'AbortError' || 
-                      error.cause?.name === 'AbortError' ||
-                      error.message?.includes('aborted') ||
-                      error.message?.includes('timeout') ||
-                      error.message?.includes('AbortError');
-    const isQuota = error.status === 429 || error.status === 503 || error.status === 504;
-    
+    const isTimeout = error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('timeout');
+    const isQuota   = [429, 503, 504].includes(error.status);
+
     if (isTimeout || isQuota) {
+      console.warn(`[LLM] Falling back to mock: ${isTimeout ? 'timeout' : `HTTP ${error.status}`}`);
       return mockAnswer(question, retrievedChunks);
     }
     throw error;
@@ -461,31 +397,37 @@ export async function generateAnswer(
 
 function buildPrompt(
   question: string,
-  context: string,
   chunks: { id: string; documentId: string; pageNumber: number; text: string }[]
 ): string {
-  const chunkRefs = chunks.map((c, i) => 
-    `[Chunk ${i + 1}] (chunkId: ${c.id}, page: ${c.pageNumber})\n${c.text}`
-  ).join('\n\n---\n\n');
+  const chunkRefs = chunks
+    .map((c, i) => `[Chunk ${i + 1}] id=${c.id} page=${c.pageNumber}\n${c.text}`)
+    .join('\n\n---\n\n');
 
-  return `You are an AI assistant that answers questions based ONLY on the provided document excerpts. 
-Your response must be grounded in the evidence. If the documents don't contain the answer, say so.
+  return `You are an expert AI that answers questions using ONLY the document excerpts provided.
+
+CONTEXT: The document may be a slide deck. Slide decks often contain:
+- Learning objective lines starting with verbs like "Explain...", "Analyze...", "Understand..."
+- Discussion question lists
+- Short title/header lines
+- Actual content mixed in with the above
+
+YOUR TASK:
+1. IGNORE all learning objective lines (e.g. "Explain inflectional morphology with examples")
+2. IGNORE discussion question lists
+3. IGNORE slide section headers
+4. Focus ONLY on actual explanatory content — definitions, prose descriptions, examples, diagrams described in text
+5. Synthesise a clear, well-written answer in natural language
+6. Use **bold** for key terms
+7. If the answer involves steps or types, use a numbered or bullet list
+8. Cite page numbers inline: "Morphology is the study of word structure [Page 4]."
+9. Do NOT include a "Sources:" section — citations are shown separately
 
 Question: ${question}
 
 Document Excerpts:
 ${chunkRefs}
 
-Instructions:
-1. Answer the question using ONLY the information in the excerpts above.
-2. Write a natural, readable answer (like a helpful assistant). Do NOT include chunk numbers like [1], [2] in your answer.
-3. Instead, cite sources inline using page numbers like this: "LSTM uses a memory cell [Page 12]."
-4. In the citations array, include ONLY chunks you actually used.
-5. For each citation, provide: chunkId (from the Chunk X header), documentId, pageNumber, and a short excerpt (max 200 chars) from that chunk.
-6. Set confidence (0-1) based on how well the excerpts support your answer.
-7. If the excerpts don't contain enough information, state that clearly and set confidence low.
-
-Return JSON only.`;
+Return valid JSON only with keys: answer (string), citations (array), confidence (0–1 number).`;
 }
 
 function validateCitations(
@@ -493,16 +435,15 @@ function validateCitations(
   retrievedChunks: { id: string; documentId: string; pageNumber: number; text: string }[]
 ): Citation[] {
   const chunkMap = new Map(retrievedChunks.map(c => [c.id, c]));
-
   return citations
     .filter(c => chunkMap.has(c.chunkId))
     .map(c => {
       const chunk = chunkMap.get(c.chunkId)!;
       return {
-        chunkId: c.chunkId,
+        chunkId:    c.chunkId,
         documentId: c.documentId,
-        pageNumber: c.pageNumber,
-        excerpt: c.excerpt.slice(0, 200)
+        pageNumber: chunk.pageNumber,
+        excerpt:    c.excerpt.slice(0, 200),
       };
     });
 }

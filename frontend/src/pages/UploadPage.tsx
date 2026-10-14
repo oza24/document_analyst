@@ -71,8 +71,9 @@ export function UploadPage() {
   return (
     <div className="upload-page">
       <div className="upload-card">
+        <div className="upload-card-badge">✦ AI Document Analyst</div>
         <h1>EvidenceLens</h1>
-        <p className="subtitle">Upload a PDF or TXT document to start asking questions</p>
+        <p className="subtitle">Upload a PDF or TXT document and ask questions — answers come with verified citations</p>
 
         <div
           className={`drop-zone ${dragActive ? 'active' : ''} ${file ? 'has-file' : ''}`}

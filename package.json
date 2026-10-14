@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
+    "packages/*",
     "frontend",
-    "backend",
-    "packages/*"
+    "backend"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
     "build": "npm run build --workspaces",
+    "build:shared": "npm run build --workspace=@oza24/shared-types",
+    "build:backend": "npm run build:shared && npm run build --workspace=backend",
+    "build:frontend": "npm run build:shared && npm run build --workspace=frontend",
+    "start:backend": "npm start --workspace=backend",
     "install:all": "npm install"
   },
   "devDependencies": {
