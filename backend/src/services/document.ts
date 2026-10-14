@@ -37,8 +37,9 @@ function extractFromPdf(buffer: Buffer): Promise<{ pageNumber: number; text: str
   return new Promise((resolve, reject) => {
     const parser = new PDFParser();
 
-    parser.on('pdfParser_dataError', (errData: { parserError: Error }) => {
-      reject(new Error(`Failed to parse PDF: ${errData.parserError.message}`));
+    parser.on('pdfParser_dataError', (errData: Error | { parserError: Error }) => {
+      const error = 'parserError' in errData ? errData.parserError : errData;
+      reject(new Error(`Failed to parse PDF: ${error.message}`));
     });
 
     parser.on('pdfParser_dataReady', (pdfData: {
