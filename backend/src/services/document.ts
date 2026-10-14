@@ -1,4 +1,4 @@
-import { PDFParser } from 'pdf2json';
+import PDFParser from 'pdf2json';
 
 export async function extractText(
   buffer: Buffer,
