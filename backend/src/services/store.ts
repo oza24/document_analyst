@@ -1,4 +1,4 @@
-import { Document, Chunk } from 'shared-types';
+import { Document, Chunk } from '@oza24/shared-types';
 
 const documents = new Map<string, { document: Document; chunks: Chunk[] }>();
 

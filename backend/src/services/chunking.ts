@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Chunk } from 'shared-types';
+import { Chunk } from '@oza24/shared-types';
 
 const TARGET_CHUNK_TOKENS = 500;
 const OVERLAP_TOKENS = 50;

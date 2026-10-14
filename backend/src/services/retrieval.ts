@@ -1,4 +1,4 @@
-import { Chunk } from 'shared-types';
+import { Chunk } from '@oza24/shared-types';
 
 export interface ScoredChunk {
   chunk: Chunk;

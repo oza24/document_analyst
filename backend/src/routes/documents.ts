@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDocument, getAllDocuments } from '../services/store.js';
-import { Document } from 'shared-types';
+import { Document } from '@oza24/shared-types';
 
 const router = Router();
 

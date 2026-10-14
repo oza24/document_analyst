@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractText } from '../services/document.js';
 import { chunkPages } from '../services/chunking.js';
 import { saveDocument } from '../services/store.js';
-import { Document } from 'shared-types';
+import { Document } from '@oza24/shared-types';
 
 const router = Router();
 

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getDocument } from '../services/store.js';
 import { searchBM25, ScoredChunk } from '../services/retrieval.js';
 import { generateAnswer } from '../services/llm.js';
-import { AskRequest, AskResponse, Chunk } from 'shared-types';
+import { AskRequest, AskResponse, Chunk } from '@oza24/shared-types';
 
 const router = Router();
 

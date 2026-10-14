@@ -15,6 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@oza24/shared-types": "^1.0.0",
     "@types/uuid": "^10.0.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.7",
@@ -22,7 +23,6 @@
     "express-rate-limit": "^8.7.1",
     "multer": "^2.4.0",
     "pdf-parse": "^2.4.5",
-    "shared-types": "*",
     "uuid": "^14.0.3"
   },
   "devDependencies": {

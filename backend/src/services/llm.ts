@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
-import { Citation, AskResponse } from 'shared-types';
+import { Citation, AskResponse } from '@oza24/shared-types';
 import dotenv from 'dotenv';
 
 dotenv.config();
