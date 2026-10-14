@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build:shared-types --workspace=packages/shared-types && npm run build --workspace=frontend",
+  "buildCommand": "npm run build:shared-types --workspace=@oza24/shared-types && npm run build --workspace=frontend",
   "outputDirectory": "frontend/dist",
   "installCommand": "npm install",
   "rewrites": [
