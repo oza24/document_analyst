@@ -3,7 +3,7 @@ services:
     name: evidencelens-api
     runtime: node
     buildCommand: npm ci && npm run build --workspace=packages/shared-types && cd backend && npm run build
-    startCommand: npm run start
+    startCommand: npm run start --workspace=backend
     envVars:
       - key: GEMINI_API_KEY
         sync: false
