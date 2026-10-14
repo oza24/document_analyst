@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@oza24/shared-types": "^1.0.0",
+    "@oza24/shared-types": "file:../packages/shared-types",
     "@types/react-router-dom": "^5.3.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
