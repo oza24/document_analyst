@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Document } from 'shared-types';
+import type { Document } from '@oza24/shared-types';
 
 export function UploadPage() {
   const navigate = useNavigate();

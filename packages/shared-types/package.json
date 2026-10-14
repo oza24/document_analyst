@@ -1,17 +1,22 @@
 {
-  "name": "shared-types",
+  "name": "@oza24/shared-types",   
   "version": "1.0.0",
   "description": "Shared TypeScript types for EvidenceLens",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
+  "files": ["dist"],                      
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["typescript", "types", "evidencelens"],
+  "author": "vilas oza <vilasoza19@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oza24/document-analyst.git"
+  },
   "devDependencies": {
     "typescript": "^5.6.0"
   }

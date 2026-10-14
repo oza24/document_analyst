@@ -1,4 +1,4 @@
-import type { Document, Chunk, AskRequest, AskResponse } from 'shared-types';
+import type { Document, Chunk, Citation, AskRequest, AskResponse } from '@oza24/shared-types';
 
 const API_BASE = '/api';
 

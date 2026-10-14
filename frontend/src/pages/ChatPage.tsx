@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Document, Chunk, Citation, AskResponse } from 'shared-types';
+import type { Document, Chunk, Citation, AskResponse } from '@oza24/shared-types';
 
 interface Message {
   role: 'user' | 'assistant';
