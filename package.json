@@ -9,7 +9,8 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
-    "build": "npm run build --workspaces",
+    "build": "npm run build:shared-types && npm run build --workspaces",
+    "build:shared-types": "npm run build --workspace=packages/shared-types",
     "build:backend": "npm run build --workspace=backend",
     "build:frontend": "npm run build --workspace=frontend",
     "start": "npm start --workspace=backend",
