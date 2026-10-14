@@ -2,7 +2,7 @@ services:
   - type: web
     name: evidencelens-api
     runtime: node
-    buildCommand: npm install && npm run build:backend
+    buildCommand: npm ci && npm run build:backend
     startCommand: npm run start:backend
     envVars:
       - key: GEMINI_API_KEY
