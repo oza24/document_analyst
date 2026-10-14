@@ -7,10 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preinstall": "node -e \"const fs=require('fs');const path=require('path');const src=path.resolve(__dirname,'../packages/shared-types');const dest=path.resolve(__dirname,'shared-types');if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true});console.log('Copied shared-types');}else{console.log('shared-types not found, using npm package');}\""
   },
   "dependencies": {
-    "@oza24/shared-types": "file:../packages/shared-types",
+    "@oza24/shared-types": "file:./shared-types",
     "@types/react-router-dom": "^5.3.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
