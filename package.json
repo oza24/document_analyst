@@ -12,6 +12,7 @@
     "build": "npm run build --workspaces",
     "build:backend": "npm run build --workspace=backend",
     "build:frontend": "npm run build --workspace=frontend",
+    "start": "npm start --workspace=backend",
     "start:backend": "npm start --workspace=backend",
     "install:all": "npm install"
   },
