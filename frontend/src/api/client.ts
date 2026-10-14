@@ -1,6 +1,6 @@
 import type { Document, Chunk, Citation, AskRequest, AskResponse } from '@oza24/shared-types';
 
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${endpoint}`, {
