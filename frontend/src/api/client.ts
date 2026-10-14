@@ -3,8 +3,9 @@ import type { Document, Chunk, Citation, AskRequest, AskResponse } from '@oza24/
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: isFormData ? options.headers : { 'Content-Type': 'application/json', ...options.headers },
     ...options
   });
 
