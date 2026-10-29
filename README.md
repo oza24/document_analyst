@@ -308,6 +308,3 @@ MIT License — Built for VEGAH Round 2 AI Engineering Challenge.
 - **VEGAH** for the challenge
 
 ---
-
-*Built with ❤️ in 48 hours for VEGAH Round 2*/ /   t r i g g e r   d e p l o y  
- 
